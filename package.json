@@ -1,0 +1,13 @@
+{
+  "name": "opencode-codex-usage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Minimal opencode TUI plugin for live Codex usage.",
+  "dependencies": {
+    "@opencode-ai/plugin": "1.14.19",
+    "@opentui/core": "^0.2.10",
+    "@opentui/solid": "^0.2.10",
+    "solid-js": "^1.9.9"
+  }
+}
