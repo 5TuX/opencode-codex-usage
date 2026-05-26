@@ -1,4 +1,5 @@
 import type {
+  Message,
   TuiPlugin,
   TuiPluginApi,
   TuiPluginModule,
@@ -122,6 +123,43 @@ function usageColor(theme: TuiThemeCurrent, usedPercent?: number) {
   return theme.text;
 }
 
+function isCodexLikeProvider(providerID?: string, modelID?: string): boolean {
+  const p = (providerID ?? "").toLowerCase();
+  const m = (modelID ?? "").toLowerCase();
+  if (p.includes("copilot") || m.includes("copilot")) return false;
+  if (p.includes("openai") || p.includes("chatgpt") || p.includes("codex")) return true;
+  if (m.includes("codex")) return true;
+  return false;
+}
+
+function extractProvider(message: Message): { providerID?: string; modelID?: string } {
+  if (message.role === "assistant") {
+    return { providerID: message.providerID, modelID: message.modelID };
+  }
+  return {
+    providerID: message.model?.providerID,
+    modelID: message.model?.modelID,
+  };
+}
+
+function shouldShowUsageForSession(api: TuiPluginApi, sessionID?: string): boolean {
+  if (!sessionID) return false;
+  const messages = api.state.session.messages(sessionID);
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const current = extractProvider(messages[i]);
+    if (current.providerID || current.modelID) {
+      return isCodexLikeProvider(current.providerID, current.modelID);
+    }
+  }
+  return false;
+}
+
+function currentSessionID(api: TuiPluginApi): string | undefined {
+  const route = api.route.current;
+  if (route.name === "session") return route.params.sessionID;
+  return undefined;
+}
+
 function UsageBadge(props: {
   state: UsageState;
   theme: TuiThemeCurrent;
@@ -143,20 +181,24 @@ function UsageBadge(props: {
         const primaryUsed = ready.primary?.used_percent;
         const secondaryUsed = ready.secondary?.used_percent;
         const primaryReset = formatReset(ready.primary);
+        const secondaryReset = formatReset(ready.secondary);
         return (
           <box>
             <text fg={props.theme.textMuted}>{plan ? `${plan} ` : ""}</text>
             <text fg={usageColor(props.theme, primaryUsed)}>
               {typeof primaryUsed === "number" ? `${primaryLabel} ${primaryUsed}%` : `${primaryLabel} --`}
             </text>
+            <Show when={primaryReset}>
+              <text fg={props.theme.textMuted}>{` (${primaryReset})`}</text>
+            </Show>
             <Show when={typeof secondaryUsed === "number"}>
               <text fg={props.theme.textMuted}>{" | "}</text>
               <text fg={usageColor(props.theme, secondaryUsed)}>
                 {`${secondaryLabel} ${secondaryUsed}%`}
               </text>
             </Show>
-            <Show when={primaryReset}>
-              <text fg={props.theme.textMuted}>{` (${primaryReset})`}</text>
+            <Show when={typeof secondaryUsed === "number" && secondaryReset}>
+              <text fg={props.theme.textMuted}>{` (${secondaryReset})`}</text>
             </Show>
           </box>
         );
@@ -201,9 +243,12 @@ function createRefreshLoop(api: TuiPluginApi) {
     order: 90,
     slots: {
       home_prompt_right(ctx: TuiSlotContext) {
+        if (!shouldShowUsageForSession(api, currentSessionID(api))) return null;
         return <UsageBadge state={state()} theme={ctx.theme.current} />;
       },
-      session_prompt_right(ctx: TuiSlotContext) {
+      session_prompt_right(ctx: TuiSlotContext & { session_id?: string }) {
+        const sessionID = ctx.session_id ?? currentSessionID(api);
+        if (!shouldShowUsageForSession(api, sessionID)) return null;
         return <UsageBadge state={state()} theme={ctx.theme.current} />;
       },
     },
