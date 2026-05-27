@@ -122,7 +122,7 @@ function formatWindowLabel(window?: WindowSnapshot, fallback?: string): string {
   const seconds = window?.limit_window_seconds;
   if (!seconds) return fallback ?? "limit";
   if (Math.abs(seconds - 18_000) < 120) return "5h";
-  if (Math.abs(seconds - 604_800) < 600) return "wk";
+  if (Math.abs(seconds - 604_800) < 600) return "7d";
   if (seconds % 86_400 === 0) return `${Math.round(seconds / 86_400)}d`;
   if (seconds % 3_600 === 0) return `${Math.round(seconds / 3_600)}h`;
   return fallback ?? "limit";
@@ -131,9 +131,21 @@ function formatWindowLabel(window?: WindowSnapshot, fallback?: string): string {
 function formatReset(window?: WindowSnapshot): string | undefined {
   const seconds = window?.reset_after_seconds;
   if (typeof seconds !== "number") return undefined;
-  if (seconds < 3600) return `${Math.ceil(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.ceil(seconds / 3600)}h`;
-  return `${Math.ceil(seconds / 86400)}d`;
+
+  const totalMinutes = Math.max(1, Math.ceil(seconds / 60));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d${hours}h` : `${days}d`;
+  }
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;
+  }
+
+  return `${minutes}m`;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -283,28 +295,28 @@ function UsageBadge(props: {
         const ready = props.state as Extract<UsageState, { status: "ready" }>;
         const plan = formatPlan(ready.planType);
         const primaryLabel = formatWindowLabel(ready.primary, "5h");
-        const secondaryLabel = formatWindowLabel(ready.secondary, "wk");
+        const secondaryLabel = formatWindowLabel(ready.secondary, "7d");
         const primaryUsed = ready.primary?.used_percent;
         const secondaryUsed = ready.secondary?.used_percent;
         const primaryReset = formatReset(ready.primary);
         const secondaryReset = formatReset(ready.secondary);
         return (
           <box flexDirection="row">
-            <text fg={props.theme.textMuted}>{plan ? `${plan} – ` : ""}</text>
+            <text fg={props.theme.textMuted}>{plan ? `${plan} - ` : ""}</text>
             <text fg={usageColor(props.theme, primaryUsed)}>
-              {typeof primaryUsed === "number" ? `${primaryLabel} ${primaryUsed}%` : `${primaryLabel} --`}
+              {typeof primaryUsed === "number" ? `${primaryLabel}: ${primaryUsed}%` : `${primaryLabel}: --`}
             </text>
             <Show when={primaryReset}>
-              <text fg={props.theme.textMuted}>{` (${primaryReset})`}</text>
+              <text fg={props.theme.textMuted}>{` (-${primaryReset})`}</text>
             </Show>
             <Show when={typeof secondaryUsed === "number"}>
-              <text fg={props.theme.textMuted}>{" | "}</text>
+              <text fg={props.theme.textMuted}>{" - "}</text>
               <text fg={usageColor(props.theme, secondaryUsed)}>
-                {`${secondaryLabel} ${secondaryUsed}%`}
+                {`${secondaryLabel}: ${secondaryUsed}%`}
               </text>
             </Show>
             <Show when={typeof secondaryUsed === "number" && secondaryReset}>
-              <text fg={props.theme.textMuted}>{` (${secondaryReset})`}</text>
+              <text fg={props.theme.textMuted}>{` (-${secondaryReset})`}</text>
             </Show>
           </box>
         );
