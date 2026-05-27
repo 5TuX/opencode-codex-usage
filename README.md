@@ -1,22 +1,31 @@
-# opencode-codex-usage
+# opencode-provider-usage
 
-Minimal `opencode` TUI plugin that shows live ChatGPT Codex usage in the prompt area.
+Minimal `opencode` TUI plugin that shows live provider usage in the prompt area.
 
-It reads your existing local `opencode` OpenAI auth and fetches usage from the same backend Codex uses.
+It reads your existing local `opencode` auth and shows a provider-aware badge for supported providers.
 
-## What it shows
+## Supported Providers
 
-- 5h usage
-- weekly usage
-- time until the 5h window resets
-- time until the weekly window resets
-- badge shown only when the active model/provider is OpenAI/Codex-related
+- OpenAI: 5h and 7d ChatGPT usage windows, with reset timers
+- GitHub Copilot: monthly premium interaction usage, with reset timer
+- Other providers: badge hidden
+
+## What It Shows
+
+- provider-aware badge shown only for supported providers
+- OpenAI 5h usage
+- OpenAI 7d usage
+- time until the OpenAI 5h window resets
+- time until the OpenAI 7d window resets
+- Copilot monthly usage
+- time until the Copilot monthly reset
 - percent values colored with a readable pastel Jet colormap, from blue at low usage to red near the limit
 
 Example:
 
 ```text
-Plus 5h 81% (54m) | wk 13% (3d)
+[Plus] 5h: 81% (-54m) | 7d: 13% (-3d)
+[Pro] mo: 22% (-19d)
 ```
 
 ## Install
@@ -24,13 +33,13 @@ Plus 5h 81% (54m) | wk 13% (3d)
 1. Clone this repo anywhere stable.
 
 ```bash
-git clone https://github.com/5TuX/opencode-codex-usage.git ~/opencode-codex-usage
+git clone https://github.com/5TuX/opencode-provider-usage.git ~/opencode-provider-usage
 ```
 
 2. Install dependencies.
 
 ```bash
-cd ~/opencode-codex-usage
+cd ~/opencode-provider-usage
 npm install
 ```
 
@@ -42,7 +51,7 @@ Create or update `~/.config/opencode/tui.json`:
 {
   "$schema": "https://opencode.ai/tui.json",
   "plugin": [
-    "/absolute/path/to/opencode-codex-usage/plugins/codex-usage.tsx"
+    "/absolute/path/to/opencode-provider-usage/plugins/provider-usage.tsx"
   ]
 }
 ```
@@ -51,13 +60,13 @@ Create or update `~/.config/opencode/tui.json`:
 
 ## Notes
 
-- Requires an existing `opencode` OpenAI login.
+- Requires an existing `opencode` login for whichever supported provider you want to display.
 - Reads auth from `~/.local/share/opencode/auth.json`.
 - Reads current model selection from `~/.local/state/opencode/model.json` when available.
 - Refreshes every 60 seconds.
-- Registers a command: `Refresh Codex usage`.
-- Hidden for non-Codex providers (for example Copilot).
-- Provider/model visibility is decided from the currently selected model first, then recent session history as fallback.
+- Registers commands: `Refresh provider usage`, `Debug provider usage`.
+- Hidden for unsupported providers.
+- In chat, a resumed session's provider takes precedence until you explicitly switch models afterward.
 - Visibility is refreshed every second and on TUI command/session changes so switching provider/model updates the badge without sending a message.
 
 ## Synced Device Workflow
@@ -65,16 +74,16 @@ Create or update `~/.config/opencode/tui.json`:
 For the shared multi-device setup, edit this repo copy of the plugin:
 
 ```text
-~/Documents/gdrive-shared/opencode/opencode-codex-usage/plugins/codex-usage.tsx
+~/Documents/gdrive-shared/opencode/opencode-provider-usage/plugins/provider-usage.tsx
 ```
 
-Each device should keep `~/.config/opencode/plugins/` as a real local directory and hardlink or copy the plugin file into it. The local `tui.json` should load the local file, not the synced repo path directly:
+Each device should keep `~/.config/opencode/plugins/` as a real local directory and link or copy the plugin file into it. The local `tui.json` should load the local file, not the synced repo path directly:
 
 ```json
 {
   "$schema": "https://opencode.ai/tui.json",
   "plugin": [
-    "/home/YOU/.config/opencode/plugins/codex-usage.tsx"
+    "/home/YOU/.config/opencode/plugins/provider-usage.tsx"
   ]
 }
 ```
@@ -82,23 +91,11 @@ Each device should keep `~/.config/opencode/plugins/` as a real local directory 
 After editing the repo file:
 
 1. Let the synced folder update on each device.
-2. Recreate the hardlink if the sync tool replaced the file.
+2. Recreate the local link if the sync tool replaced the file.
 3. Restart `opencode` on each device.
 
-Linux hardlink example:
+Linux symlink example:
 
 ```bash
-ln -f ~/Documents/gdrive-shared/opencode/opencode-codex-usage/plugins/codex-usage.tsx ~/.config/opencode/plugins/codex-usage.tsx
+ln -sfn ~/Documents/gdrive-shared/opencode/opencode-provider-usage/plugins/provider-usage.tsx ~/.config/opencode/plugins/provider-usage.tsx
 ```
-
-If dependencies changed, run this on each device:
-
-```bash
-cd ~/.config/opencode
-npm install
-```
-
-## Minimal Roadmap
-
-- show remaining instead of used
-- add a footer/sidebar variant

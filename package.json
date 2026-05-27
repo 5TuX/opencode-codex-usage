@@ -1,9 +1,9 @@
 {
-  "name": "opencode-codex-usage",
+  "name": "opencode-provider-usage",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Minimal opencode TUI plugin for live Codex usage.",
+  "description": "Minimal opencode TUI plugin for provider-aware usage badges.",
   "dependencies": {
     "@opencode-ai/plugin": "1.14.19",
     "@opentui/core": "^0.2.10",
