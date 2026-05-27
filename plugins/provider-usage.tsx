@@ -558,12 +558,6 @@ async function resolveProvider(
 
   if (sessionSelectionChanged && hasProviderHint(selected)) {
     hint = selected;
-  } else if (
-    hasProviderHint(selected) &&
-    hasProviderHint(fetchedSession) &&
-    providerFromHint(selected) !== providerFromHint(fetchedSession)
-  ) {
-    hint = selected;
   } else if (hasProviderHint(fetchedSession)) {
     hint = fetchedSession;
   } else {
