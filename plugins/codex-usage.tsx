@@ -7,13 +7,28 @@ import type {
   TuiThemeCurrent,
 } from "@opencode-ai/plugin/tui";
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createRoot } from "solid-js";
 import { createSignal, Show } from "solid-js";
 
 const PLUGIN_ID = "codex-usage";
-const AUTH_PATH = `${process.env.HOME}/.local/share/opencode/auth.json`;
+const AUTH_PATH = join(homedir(), ".local", "share", "opencode", "auth.json");
+const MODEL_STATE_PATH = join(homedir(), ".local", "state", "opencode", "model.json");
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const REFRESH_MS = 60_000;
+const VISIBILITY_REFRESH_MS = 1_000;
+const JET_PASTEL_MIX = 0.28;
+
+type Rgb = [number, number, number];
+
+const JET_STOPS: Array<{ at: number; color: Rgb }> = [
+  { at: 0, color: [0, 0, 1] },
+  { at: 0.25, color: [0, 1, 1] },
+  { at: 0.5, color: [0, 1, 0] },
+  { at: 0.75, color: [1, 1, 0] },
+  { at: 1, color: [1, 0, 0] },
+];
 
 type WindowSnapshot = {
   used_percent?: number;
@@ -28,6 +43,11 @@ type UsagePayload = {
     primary_window?: WindowSnapshot;
     secondary_window?: WindowSnapshot;
   };
+};
+
+type ProviderHint = {
+  providerID?: string;
+  modelID?: string;
 };
 
 type UsageState =
@@ -116,23 +136,85 @@ function formatReset(window?: WindowSnapshot): string | undefined {
   return `${Math.ceil(seconds / 86400)}d`;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function toHexByte(value: number): string {
+  return Math.round(clamp(value, 0, 1) * 255)
+    .toString(16)
+    .padStart(2, "0");
+}
+
+function jetColor(usedPercent: number): string {
+  const value = clamp(usedPercent, 0, 100) / 100;
+  const [rawRed, rawGreen, rawBlue] = interpolateJet(value);
+  const red = pastelize(rawRed);
+  const green = pastelize(rawGreen);
+  const blue = pastelize(rawBlue);
+  return `#${toHexByte(red)}${toHexByte(green)}${toHexByte(blue)}`;
+}
+
+function interpolateJet(value: number): Rgb {
+  for (let i = 1; i < JET_STOPS.length; i += 1) {
+    const previous = JET_STOPS[i - 1];
+    const next = JET_STOPS[i];
+    if (value <= next.at) {
+      const span = next.at - previous.at;
+      const amount = span === 0 ? 0 : (value - previous.at) / span;
+      return [
+        previous.color[0] + (next.color[0] - previous.color[0]) * amount,
+        previous.color[1] + (next.color[1] - previous.color[1]) * amount,
+        previous.color[2] + (next.color[2] - previous.color[2]) * amount,
+      ];
+    }
+  }
+  return JET_STOPS[JET_STOPS.length - 1].color;
+}
+
+function pastelize(channel: number): number {
+  return channel * (1 - JET_PASTEL_MIX) + JET_PASTEL_MIX;
+}
+
 function usageColor(theme: TuiThemeCurrent, usedPercent?: number) {
   if (typeof usedPercent !== "number") return theme.textMuted;
-  if (usedPercent >= 90) return theme.error;
-  if (usedPercent >= 75) return theme.warning;
-  return theme.text;
+  return jetColor(usedPercent);
 }
 
 function isCodexLikeProvider(providerID?: string, modelID?: string): boolean {
-  const p = (providerID ?? "").toLowerCase();
-  const m = (modelID ?? "").toLowerCase();
-  if (p.includes("copilot") || m.includes("copilot")) return false;
-  if (p.includes("openai") || p.includes("chatgpt") || p.includes("codex")) return true;
-  if (m.includes("codex")) return true;
+  const provider = (providerID ?? "").toLowerCase();
+  const model = (modelID ?? "").toLowerCase();
+  if (provider.includes("copilot") || model.includes("copilot")) return false;
+  if (provider.includes("openai") || provider.includes("chatgpt") || provider.includes("codex")) return true;
+  if (model.includes("codex")) return true;
   return false;
 }
 
-function configuredProviderHint(api: TuiPluginApi): { providerID?: string; modelID?: string } {
+function isKnownNonCodexProvider(providerID?: string, modelID?: string): boolean {
+  const provider = (providerID ?? "").toLowerCase();
+  const model = (modelID ?? "").toLowerCase();
+  if (!provider && !model) return false;
+  if (isCodexLikeProvider(provider, model)) return false;
+  return true;
+}
+
+function selectedProviderHint(): ProviderHint {
+  try {
+    const raw = JSON.parse(readFileSync(MODEL_STATE_PATH, "utf8"));
+    const selected = raw?.recent?.[0];
+    if (selected?.providerID || selected?.modelID) {
+      return {
+        providerID: selected.providerID,
+        modelID: selected.modelID,
+      };
+    }
+  } catch {
+    // Missing or stale TUI model state should not hide the badge.
+  }
+  return {};
+}
+
+function configuredProviderHint(api: TuiPluginApi): ProviderHint {
   const model = api.state.config.model;
   if (typeof model !== "string" || !model.trim()) return {};
   const value = model.trim();
@@ -146,7 +228,7 @@ function configuredProviderHint(api: TuiPluginApi): { providerID?: string; model
   return { modelID: value };
 }
 
-function extractProvider(message: Message): { providerID?: string; modelID?: string } {
+function extractProvider(message: Message): ProviderHint {
   if (message.role === "assistant") {
     return { providerID: message.providerID, modelID: message.modelID };
   }
@@ -157,20 +239,25 @@ function extractProvider(message: Message): { providerID?: string; modelID?: str
 }
 
 function shouldShowUsageForSession(api: TuiPluginApi, sessionID?: string): boolean {
-  const configured = configuredProviderHint(api);
-  if (configured.providerID || configured.modelID) {
-    return isCodexLikeProvider(configured.providerID, configured.modelID);
+  const selected = selectedProviderHint();
+  if (selected.providerID || selected.modelID) {
+    return !isKnownNonCodexProvider(selected.providerID, selected.modelID);
   }
 
-  if (!sessionID) return false;
+  const configured = configuredProviderHint(api);
+  if (configured.providerID || configured.modelID) {
+    return !isKnownNonCodexProvider(configured.providerID, configured.modelID);
+  }
+
+  if (!sessionID) return true;
   const messages = api.state.session.messages(sessionID);
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const current = extractProvider(messages[i]);
     if (current.providerID || current.modelID) {
-      return isCodexLikeProvider(current.providerID, current.modelID);
+      return !isKnownNonCodexProvider(current.providerID, current.modelID);
     }
   }
-  return false;
+  return true;
 }
 
 function currentSessionID(api: TuiPluginApi): string | undefined {
@@ -250,6 +337,7 @@ function createRefreshLoop(api: TuiPluginApi) {
 
   void refresh();
   const interval = setInterval(() => void refresh(), REFRESH_MS);
+  const visibilityInterval = setInterval(bumpVisibility, VISIBILITY_REFRESH_MS);
 
   const commandDispose = api.command.register(() => [
     {
@@ -286,6 +374,7 @@ function createRefreshLoop(api: TuiPluginApi) {
   api.lifecycle.onDispose(() => {
     disposed = true;
     clearInterval(interval);
+    clearInterval(visibilityInterval);
     offTuiCommand();
     offSessionSelect();
     offSessionUpdated();
