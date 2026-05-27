@@ -251,22 +251,23 @@ function extractProvider(message: Message): ProviderHint {
 }
 
 function shouldShowUsageForSession(api: TuiPluginApi, sessionID?: string): boolean {
-  const selected = selectedProviderHint();
-  if (selected.providerID || selected.modelID) {
-    return !isKnownNonCodexProvider(selected.providerID, selected.modelID);
-  }
-
   const configured = configuredProviderHint(api);
   if (configured.providerID || configured.modelID) {
     return !isKnownNonCodexProvider(configured.providerID, configured.modelID);
   }
 
-  if (!sessionID) return true;
-  const messages = api.state.session.messages(sessionID);
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const current = extractProvider(messages[i]);
-    if (current.providerID || current.modelID) {
-      return !isKnownNonCodexProvider(current.providerID, current.modelID);
+  const selected = selectedProviderHint();
+  if (selected.providerID || selected.modelID) {
+    return !isKnownNonCodexProvider(selected.providerID, selected.modelID);
+  }
+
+  if (sessionID) {
+    const messages = api.state.session.messages(sessionID);
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const current = extractProvider(messages[i]);
+      if (current.providerID || current.modelID) {
+        return !isKnownNonCodexProvider(current.providerID, current.modelID);
+      }
     }
   }
   return true;
