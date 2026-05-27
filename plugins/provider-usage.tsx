@@ -579,9 +579,9 @@ function providerFromHint(hint: ProviderHint): ActiveProvider {
 }
 
 function liveSelectedProviderHint(api: TuiPluginApi): ProviderHint {
-  const selected = selectedProviderHint();
-  if (hasProviderHint(selected)) return selected;
-  return configuredProviderHint(api);
+  const configured = configuredProviderHint(api);
+  if (hasProviderHint(configured)) return configured;
+  return selectedProviderHint();
 }
 
 function selectedProviderHint(): ProviderHint {
@@ -652,8 +652,8 @@ function stateMatchesProvider(state: UsageState, provider: ActiveProvider): bool
   return state.status === "ready" && state.provider === provider;
 }
 
-function stateMatchesResolution(state: UsageState, resolution?: ProviderResolution): boolean {
-  return !!resolution && stateMatchesProvider(state, resolution.provider);
+function stateMatchesResolution(state: UsageState, resolution: ProviderResolution | undefined, sessionID?: string): boolean {
+  return !!resolution && resolution.sessionID === sessionID && stateMatchesProvider(state, resolution.provider);
 }
 
 function UsageBadge(props: {
@@ -949,7 +949,7 @@ function createRefreshLoop(api: TuiPluginApi) {
           )
         )
           return null;
-        if (!stateMatchesResolution(state(), resolution())) return null;
+        if (!stateMatchesResolution(state(), resolution(), sessionID)) return null;
         return <UsageBadge state={state()} theme={ctx.theme.current} compact />;
       },
       session_prompt_right(ctx: TuiSlotContext & { session_id?: string }) {
@@ -967,7 +967,7 @@ function createRefreshLoop(api: TuiPluginApi) {
           )
         )
           return null;
-        if (!stateMatchesResolution(state(), resolution())) return null;
+        if (!stateMatchesResolution(state(), resolution(), sessionID)) return null;
         return <UsageBadge state={state()} theme={ctx.theme.current} />;
       },
     },
