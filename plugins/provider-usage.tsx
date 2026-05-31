@@ -14,6 +14,7 @@ import { createSignal, Show } from "solid-js";
 
 const PLUGIN_ID = "provider-usage";
 const AUTH_PATH = join(homedir(), ".local", "share", "opencode", "auth.json");
+const SECRETS_ENV_PATH = join(homedir(), ".config", "opencode", "secrets.env");
 const MODEL_STATE_PATH = join(homedir(), ".local", "state", "opencode", "model.json");
 const USAGE_URL = "https://chatgpt.com/backend-api/wham/usage";
 const COPILOT_USAGE_URL = "https://api.github.com/copilot_internal/user";
@@ -244,13 +245,46 @@ function readAnthropicAuth(): { key: string } {
   return { key: anthropic.key };
 }
 
-function readZenAuth(): { key: string } {
-  const raw = JSON.parse(readFileSync(AUTH_PATH, "utf8"));
-  const opencode = raw?.opencode;
-  if (!opencode?.key) {
-    throw new Error("OpenCode Zen auth not found");
+function readEnvVarFromFile(path: string, key: string): string | undefined {
+  try {
+    const content = readFileSync(path, "utf8");
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq < 0) continue;
+      const name = trimmed.slice(0, eq).trim();
+      let value = trimmed.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (name === key) return value;
+    }
+  } catch {
+    // ignore
   }
-  return { key: opencode.key };
+  return undefined;
+}
+
+function readZenAuth(): { key: string } {
+  const envKey = process.env.OPENCODE_API_KEY;
+  if (envKey) return { key: envKey };
+
+  const fileKey = readEnvVarFromFile(SECRETS_ENV_PATH, "OPENCODE_API_KEY");
+  if (fileKey) return { key: fileKey };
+
+  try {
+    const raw = JSON.parse(readFileSync(AUTH_PATH, "utf8"));
+    const opencode = raw?.opencode;
+    if (opencode?.key) return { key: opencode.key };
+  } catch {
+    // ignore
+  }
+
+  throw new Error("OpenCode Zen auth not found");
 }
 
 async function fetchOpenAIUsage(): Promise<Exclude<UsageState, { status: "loading" | "error" }>> {
@@ -389,23 +423,29 @@ async function fetchZenModelCost(modelID?: string): Promise<ZenPriceResult | und
   if (!modelID) return undefined;
   const normalizedModelID = normalizeZenModelID(modelID);
   const fallback = ZEN_FALLBACK_MODEL_COSTS[normalizedModelID];
-  const auth = readZenAuth();
-  const response = await fetch(ZEN_MODELS_URL, {
-    headers: {
-      Authorization: `Bearer ${auth.key}`,
-      "User-Agent": "opencode-provider-usage",
-    },
-  });
 
-  if (!response.ok) {
-    throw new Error(`OpenCode Zen models request failed (${response.status})`);
+  try {
+    const auth = readZenAuth();
+    const response = await fetch(ZEN_MODELS_URL, {
+      headers: {
+        Authorization: `Bearer ${auth.key}`,
+        "User-Agent": "opencode-provider-usage",
+      },
+    });
+
+    if (!response.ok) {
+      return fallback ? { cost: fallback, fallback: true } : undefined;
+    }
+
+    const payload = (await response.json()) as ZenModelsPayload;
+    const model = payload.data?.find((item) => normalizeZenModelID(item.id) === normalizedModelID);
+    if (hasZenModelCost(model?.cost)) {
+      return { cost: model.cost, fallback: false };
+    }
+  } catch {
+    // ignore
   }
 
-  const payload = (await response.json()) as ZenModelsPayload;
-  const model = payload.data?.find((item) => normalizeZenModelID(item.id) === normalizedModelID);
-  if (hasZenModelCost(model?.cost)) {
-    return { cost: model.cost, fallback: false };
-  }
   return fallback ? { cost: fallback, fallback: true } : undefined;
 }
 
@@ -952,8 +992,7 @@ function UsageBadge(props: {
           const output = formatMoney(ready.zen?.price?.output);
           const cost = formatMoney(ready.zen?.session?.cost);
           const tokens = formatCompactNumber(ready.zen?.session?.tokens);
-          const approximate = ready.zen?.session?.approximate ? "~" : "";
-          const session = props.compact ? "" : ` | sess: ${approximate}${cost}/${tokens}t`;
+          const session = props.compact ? "" : ` | sess: ${cost}/${tokens}t`;
           return (
             <box flexDirection="column">
               <text>{`[Zen] ${input}/${output} per M${session}`}</text>
